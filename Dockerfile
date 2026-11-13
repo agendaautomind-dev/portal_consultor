@@ -31,6 +31,7 @@ COPY . .
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 
 # Build-time env vars — override these with --build-arg or in compose.yml
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY

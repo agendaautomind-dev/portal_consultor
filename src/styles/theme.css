@@ -16,18 +16,30 @@ body {
 
 :root {
   --header-height: calc(var(--spacing, 0.25rem) * 12 + 1px);
+  --font-sans-system:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono-system:
+    ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --font-serif-system: Georgia, 'Times New Roman', serif;
+  --font-sans: var(--font-sans-system);
+  --font-mono: var(--font-mono-system);
+  --font-serif: var(--font-serif-system);
+  --font-google-sans-flex: var(--font-sans-system);
+  --font-source-code-pro: var(--font-mono-system);
+  --font-instrument: var(--font-sans-system);
+  --font-noto-mono: var(--font-mono-system);
+  --font-mullish: var(--font-sans-system);
+  --font-inter: var(--font-sans-system);
+  --font-architects-daughter: 'Segoe Print', 'Bradley Hand', cursive;
+  --font-dm-sans: var(--font-sans-system);
+  --font-fira-code: var(--font-mono-system);
+  --font-outfit: var(--font-sans-system);
+  --font-space-mono: var(--font-mono-system);
+  --font-jetbrains-mono: var(--font-mono-system);
+  --font-merriweather: var(--font-serif-system);
+  --font-playfair-display: var(--font-serif-system);
 }
 
-/* Apply theme fonts to body for all themes */
-/* This ensures theme-specific fonts override Next.js font variables */
-/* Font variables are defined on [data-theme] (html element) */
-/* We need to override Next.js font variables on body to use html's values */
-/* Using initial removes the property, allowing parent (html) values to cascade */
 [data-theme] body {
-  /* Remove Next.js font variables to allow theme variables from html to cascade */
-  --font-sans: initial;
-  --font-mono: initial;
-  --font-serif: initial;
-  /* Apply font-family - will now resolve from html's [data-theme] variables */
-  font-family: var(--font-sans);
+  font-family: var(--font-sans, var(--font-sans-system));
 }
