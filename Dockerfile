@@ -47,7 +47,7 @@ ARG NEXT_PUBLIC_SENTRY_DISABLED=true
 
 ENV BUILD_STANDALONE=true
 
-RUN npm run build
+RUN npm run build -- --webpack
 
 # ============================================
 # Stage 3: Production runner

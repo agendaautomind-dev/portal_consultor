@@ -4,6 +4,10 @@ import { withSentryConfig } from '@sentry/nextjs/config';
 // Define the base Next.js configuration
 const baseConfig: NextConfig = {
   output: process.env.BUILD_STANDALONE === 'true' ? 'standalone' : undefined,
+  experimental: {
+    cpus: 1,
+    webpackMemoryOptimizations: true
+  },
   images: {
     remotePatterns: [
       {
