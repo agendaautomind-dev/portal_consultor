@@ -2,28 +2,29 @@ import { auth } from '@clerk/nextjs/server';
 import PageContainer from '@/components/layout/page-container';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { getConsultantDashboardData } from '@/features/consultant/api/service';
+import { getConsultantSalesData } from '@/features/consultant/api/service';
+import { PeriodSelect } from '@/features/consultant/components/period-select';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-export default async function CommissionsPage() {
+export default async function CommissionsPage({
+  searchParams
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
   await auth.protect();
-  const data = await getConsultantDashboardData();
+  const { period } = await searchParams;
+  const data = await getConsultantSalesData(period);
   const isTeamView = data.accessScope === 'representative';
-  const confirmed = data.recentSales
-    .filter((sale) => sale.status === 'Ativa')
-    .reduce((sum, sale) => sum + (sale.commission ?? 0), 0);
-  const pending = data.recentSales
-    .filter((sale) => sale.status === 'Em análise' || sale.status === 'Pendente')
-    .reduce((sum, sale) => sum + (sale.commission ?? 0), 0);
   return (
     <PageContainer
       pageTitle={isTeamView ? 'Comissões da equipe' : 'Comissões'}
       pageDescription={
         isTeamView
-          ? 'Acompanhe os valores previstos e confirmados da equipe.'
-          : 'Acompanhe valores previstos, confirmados e o histórico de pagamento.'
+          ? 'Confira a base de vendas ativadas da equipe enquanto a regra é definida.'
+          : 'Confira sua base de vendas ativadas enquanto a regra de comissão é definida.'
       }
+      pageHeaderAction={<PeriodSelect value={data.periodKey} options={data.periodOptions} />}
     >
       <div className='mb-4'>
         <Badge
@@ -36,9 +37,7 @@ export default async function CommissionsPage() {
         >
           {data.isDemo
             ? 'Cálculo demonstrativo — regra Siprov pendente'
-            : data.commissionForecast === null
-              ? 'Dados Siprov — configure a regra de comissão'
-              : 'Dados e regra de comissão ativos'}
+            : 'Vendas Siprov identificadas — regra de comissão a confirmar'}
         </Badge>
         {isTeamView && (
           <Badge variant='secondary' className='ml-2'>
@@ -48,20 +47,16 @@ export default async function CommissionsPage() {
       </div>
       <div className='grid gap-4 md:grid-cols-3'>
         <Summary
-          title='Previsão do mês'
-          value={currency.format(data.commissionForecast ?? 0)}
-          detail='Antes de validações e estornos'
+          title='Vendas ativadas'
+          value={String(data.salesCount)}
+          detail={data.periodLabel}
         />
         <Summary
-          title='Confirmada'
-          value={currency.format(confirmed)}
-          detail='Vendas ativas desta amostra'
+          title='Mensalidades ativadas'
+          value={currency.format(data.salesValue)}
+          detail='Base comercial, não é comissão'
         />
-        <Summary
-          title='Em validação'
-          value={currency.format(pending)}
-          detail='Análises e pendências'
-        />
+        <Summary title='Comissão' value='A definir' detail='Aguardando a regra comercial' />
       </div>
       <Card className='mt-4'>
         <CardHeader>

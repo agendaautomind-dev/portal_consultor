@@ -28,6 +28,10 @@ export class SiprovClientError extends Error {
 
 export class SiprovClient {
   private token: TokenCache | null = null;
+  private readonly responseCache = new Map<
+    string,
+    { expiresAt: number; value: Promise<SiprovRecord[]> }
+  >();
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly config: SiprovClientConfig;
@@ -39,8 +43,10 @@ export class SiprovClient {
   }
 
   async listVendors(): Promise<SiprovRecord[]> {
-    const response = await this.get('/ext/administracao/vendedor');
-    return extractItems(response);
+    return this.cachedRecords('vendors', 30 * 60_000, async () => {
+      const response = await this.get('/ext/administracao/vendedor');
+      return extractItems(response);
+    });
   }
 
   async listAssociates(
@@ -49,22 +55,24 @@ export class SiprovClient {
       endDate: string;
     }
   ): Promise<SiprovRecord[]> {
-    const result: SiprovRecord[] = [];
+    return this.cachedRecords(`associates:${JSON.stringify(params)}`, 5 * 60_000, async () => {
+      const result: SiprovRecord[] = [];
 
-    for (let page = 1; page <= 100; page += 1) {
-      const response = await this.get('/ext/associado', {
-        ...sellerFilterParams(params),
-        dataCadastroInicial: params.startDate,
-        dataCadastroFinal: params.endDate,
-        pagina: page
-      });
-      const items = extractItems(response);
-      result.push(...items);
+      for (let page = 1; page <= 100; page += 1) {
+        const response = await this.get('/ext/associado', {
+          ...sellerFilterParams(params),
+          dataCadastroInicial: params.startDate,
+          dataCadastroFinal: params.endDate,
+          pagina: page
+        });
+        const items = extractItems(response);
+        result.push(...items);
 
-      if (!hasNextPage(response, page, items.length)) break;
-    }
+        if (!hasNextPage(response, page, items.length)) break;
+      }
 
-    return result;
+      return result;
+    });
   }
 
   async listTitles(
@@ -74,25 +82,43 @@ export class SiprovClient {
       endDate: string;
     }
   ): Promise<SiprovRecord[]> {
-    const result: SiprovRecord[] = [];
-    const dateParams = titleDateParams(params.dateField, params.startDate, params.endDate);
-    let offset = 0;
+    return this.cachedRecords(`titles:${JSON.stringify(params)}`, 2 * 60_000, async () => {
+      const result: SiprovRecord[] = [];
+      const dateParams = titleDateParams(params.dateField, params.startDate, params.endDate);
+      let offset = 0;
 
-    for (let page = 0; page < 100; page += 1) {
-      const response = await this.get('/ext/financeiro/titulo', {
-        tipo: 'Crédito',
-        ...sellerFilterParams(params),
-        ...dateParams,
-        inicio: offset
-      });
-      const items = extractItems(response);
-      result.push(...items);
+      for (let page = 0; page < 100; page += 1) {
+        const response = await this.get('/ext/financeiro/titulo', {
+          tipo: 'Crédito',
+          ...sellerFilterParams(params),
+          ...dateParams,
+          inicio: offset
+        });
+        const items = extractItems(response);
+        result.push(...items);
 
-      if (!hasMoreByOffset(response, offset, items.length)) break;
-      offset += items.length;
-    }
+        if (!hasMoreByOffset(response, offset, items.length)) break;
+        offset += items.length;
+      }
 
-    return result;
+      return result;
+    });
+  }
+
+  private async cachedRecords(
+    key: string,
+    ttlMs: number,
+    load: () => Promise<SiprovRecord[]>
+  ): Promise<SiprovRecord[]> {
+    const cached = this.responseCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+    const value = load().catch((error) => {
+      this.responseCache.delete(key);
+      throw error;
+    });
+    this.responseCache.set(key, { expiresAt: Date.now() + ttlMs, value });
+    return value;
   }
 
   private async authenticate(): Promise<string> {

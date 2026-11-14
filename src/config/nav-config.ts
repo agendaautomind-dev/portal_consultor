@@ -43,9 +43,6 @@ export const navGroups: NavGroup[] = [
   },
   {
     label: 'Conta',
-    items: [
-      { title: 'Meu perfil', url: '/dashboard/profile', icon: 'profile', items: [] },
-      { title: 'Notificações', url: '/dashboard/notifications', icon: 'notification', items: [] }
-    ]
+    items: [{ title: 'Meu perfil', url: '/dashboard/profile', icon: 'profile', items: [] }]
   }
 ];

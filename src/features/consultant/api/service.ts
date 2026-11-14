@@ -4,12 +4,16 @@ import { currentUser } from '@clerk/nextjs/server';
 import { getSiprovClient, isSiprovEnabled, type SiprovRecord } from '@/lib/siprov/client';
 import type {
   ConsultantDashboardData,
+  ConsultantDelinquencyData,
   ConsultantAccessScope,
   ConsultantSale,
+  ConsultantSalesData,
   DelinquentAccount,
   MonthlyPerformance,
   SaleStatus
 } from './types';
+import { resolveConsultantPeriod, type ConsultantPeriod } from './period';
+import { activationDate, uniqueActivatedBenefits } from './activation';
 
 export class ConsultantConfigurationError extends Error {
   constructor(message: string) {
@@ -18,11 +22,45 @@ export class ConsultantConfigurationError extends Error {
   }
 }
 
-export async function getConsultantDashboardData(): Promise<ConsultantDashboardData> {
+export async function getConsultantDashboardData(
+  periodKey?: string
+): Promise<ConsultantDashboardData> {
+  if (!isSiprovEnabled()) return getDemoData(periodKey);
+
+  try {
+    const consultant = await resolveConsultant();
+    const period = resolveConsultantPeriod(periodKey);
+    const [sales, delinquency] = await Promise.all([
+      loadSiprovSales(consultant, period),
+      loadSiprovDelinquency(consultant)
+    ]);
+    return { ...sales, ...delinquency };
+  } catch (error) {
+    if (process.env.SIPROV_FALLBACK_TO_DEMO?.trim().toLowerCase() === 'true') {
+      return getDemoData(periodKey);
+    }
+    throw error;
+  }
+}
+
+export async function getConsultantSalesData(periodKey?: string): Promise<ConsultantSalesData> {
+  if (!isSiprovEnabled()) return getDemoData(periodKey);
+
+  try {
+    return await loadSiprovSales(await resolveConsultant(), resolveConsultantPeriod(periodKey));
+  } catch (error) {
+    if (process.env.SIPROV_FALLBACK_TO_DEMO?.trim().toLowerCase() === 'true') {
+      return getDemoData(periodKey);
+    }
+    throw error;
+  }
+}
+
+export async function getConsultantDelinquencyData(): Promise<ConsultantDelinquencyData> {
   if (!isSiprovEnabled()) return getDemoData();
 
   try {
-    return await loadSiprovData();
+    return await loadSiprovDelinquency(await resolveConsultant());
   } catch (error) {
     if (process.env.SIPROV_FALLBACK_TO_DEMO?.trim().toLowerCase() === 'true') {
       return getDemoData();
@@ -31,33 +69,34 @@ export async function getConsultantDashboardData(): Promise<ConsultantDashboardD
   }
 }
 
-async function loadSiprovData(): Promise<ConsultantDashboardData> {
+interface ResolvedConsultant {
+  vendorId: number;
+  sellerId: number;
+  name: string;
+  accessScope: ConsultantAccessScope;
+}
+
+async function loadSiprovSales(
+  consultant: ResolvedConsultant,
+  period: ConsultantPeriod
+): Promise<ConsultantSalesData> {
   const client = getSiprovClient();
-  const consultant = await resolveConsultant();
   const sellerFilter =
     consultant.accessScope === 'representative'
       ? ({ representativeId: consultant.sellerId } as const)
       : ({ consultantId: consultant.sellerId } as const);
-  const today = new Date();
-  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  const historyStart = new Date(today.getFullYear(), today.getMonth() - 5, 1);
-  const delinquencyStart =
-    parseConfiguredDate(process.env.SIPROV_DELINQUENCY_START_DATE) ??
-    new Date(today.getFullYear() - 2, today.getMonth(), 1);
   const shouldValidateVendor = process.env.SIPROV_SKIP_VENDOR_VALIDATION !== 'true';
+  // shortcut: a Siprov só filtra associados pela data de cadastro; ajuste esta data se uma ativação puder levar mais de dois anos.
+  const salesStart =
+    parseConfiguredDate(process.env.SIPROV_SALES_START_DATE) ??
+    new Date(period.historyStart.getFullYear() - 2, period.historyStart.getMonth(), 1);
 
-  const [vendors, associates, dueTitles] = await Promise.all([
+  const [vendors, associates] = await Promise.all([
     shouldValidateVendor ? client.listVendors() : Promise.resolve([]),
     client.listAssociates({
       ...sellerFilter,
-      startDate: formatSiprovDate(historyStart),
-      endDate: formatSiprovDate(today)
-    }),
-    client.listTitles({
-      ...sellerFilter,
-      dateField: 'due',
-      startDate: formatSiprovDate(delinquencyStart),
-      endDate: formatSiprovDate(today)
+      startDate: formatSiprovDate(salesStart),
+      endDate: formatSiprovDate(period.end)
     })
   ]);
 
@@ -66,38 +105,64 @@ async function loadSiprovData(): Promise<ConsultantDashboardData> {
     throw new ConsultantConfigurationError('O consultor configurado não está ativo na Siprov.');
   }
 
-  const currentAssociates = associates.filter((item) => {
-    const date = associateDate(item);
-    return date !== null && date >= monthStart && date <= today;
+  const activatedAssociates = uniqueActivatedBenefits(associates);
+  const currentAssociates = activatedAssociates.filter((item) => {
+    const date = activationDate(item);
+    return date !== null && date >= period.start && date <= period.end;
   });
-  const commissionRate = optionalPercentage(process.env.SIPROV_COMMISSION_RATE_PERCENT);
-  const sales = currentAssociates.map((item) => mapSale(item, commissionRate));
+  const sales = currentAssociates.map(mapSale);
+  const target = positiveInteger(process.env.SIPROV_MONTHLY_TARGET, 25);
+  const consultantName = text(vendor?.nome) || consultant.name;
+  const performance = buildPerformance(activatedAssociates, target, period.start);
+
+  return {
+    consultantName,
+    accessScope: consultant.accessScope,
+    periodKey: period.key,
+    periodLabel: period.label,
+    periodOptions: period.options,
+    isDemo: false,
+    updatedAt: updatedAt(),
+    salesCount: sales.length,
+    activeSales: sales.filter((sale) => sale.status === 'Ativa').length,
+    salesValue: roundCurrency(sales.reduce((sum, sale) => sum + sale.value, 0)),
+    commissionForecast: null,
+    target,
+    performance,
+    bestMonth: performance.toSorted((a, b) => b.sales - a.sales)[0] ?? null,
+    recentSales: sales.toSorted((a, b) => parseBrazilianDate(b.date) - parseBrazilianDate(a.date))
+  };
+}
+
+async function loadSiprovDelinquency(
+  consultant: ResolvedConsultant
+): Promise<ConsultantDelinquencyData> {
+  const client = getSiprovClient();
+  const sellerFilter =
+    consultant.accessScope === 'representative'
+      ? ({ representativeId: consultant.sellerId } as const)
+      : ({ consultantId: consultant.sellerId } as const);
+  const today = new Date();
+  const delinquencyStart =
+    parseConfiguredDate(process.env.SIPROV_DELINQUENCY_START_DATE) ??
+    new Date(today.getFullYear() - 2, today.getMonth(), 1);
+  const dueTitles = await client.listTitles({
+    ...sellerFilter,
+    dateField: 'due',
+    startDate: formatSiprovDate(delinquencyStart),
+    endDate: formatSiprovDate(today)
+  });
   const delinquency = buildDelinquency(dueTitles, today);
   const maturedTitles = dueTitles.filter((item) => isMaturedTitle(item, today));
   const maturedAmount = roundCurrency(
     maturedTitles.reduce((sum, item) => sum + titleAmount(item), 0)
   );
-  const target = positiveInteger(process.env.SIPROV_MONTHLY_TARGET, 25);
-  const consultantName = text(vendor?.nome) || consultant.name;
 
   return {
-    consultantName,
+    consultantName: consultant.name,
     accessScope: consultant.accessScope,
-    periodLabel: new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(today),
     isDemo: false,
-    updatedAt: new Intl.DateTimeFormat('pt-BR', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-      timeZone: 'America/Sao_Paulo'
-    }).format(today),
-    salesCount: sales.length,
-    activeSales: sales.filter((sale) => sale.status === 'Ativa').length,
-    salesValue: roundCurrency(sales.reduce((sum, sale) => sum + sale.value, 0)),
-    commissionForecast:
-      commissionRate === null
-        ? null
-        : roundCurrency(sales.reduce((sum, sale) => sum + (sale.commission ?? 0), 0)),
-    target,
+    updatedAt: updatedAt(),
     delinquency: {
       associates: delinquency.accounts.length,
       overdueTitles: delinquency.overdueTitles,
@@ -111,18 +176,11 @@ async function loadSiprovData(): Promise<ConsultantDashboardData> {
       dueTitles: maturedTitles.length,
       dueAmount: maturedAmount
     },
-    delinquentAccounts: delinquency.accounts,
-    performance: buildPerformance(associates, target, today),
-    recentSales: sales.toSorted((a, b) => parseBrazilianDate(b.date) - parseBrazilianDate(a.date))
+    delinquentAccounts: delinquency.accounts
   };
 }
 
-async function resolveConsultant(): Promise<{
-  vendorId: number;
-  sellerId: number;
-  name: string;
-  accessScope: ConsultantAccessScope;
-}> {
+async function resolveConsultant(): Promise<ResolvedConsultant> {
   const user = await currentUser();
   if (!user) throw new ConsultantConfigurationError('Usuário não autenticado.');
 
@@ -150,12 +208,13 @@ async function resolveConsultant(): Promise<{
   };
 }
 
-function mapSale(item: SiprovRecord, commissionRate: number | null): ConsultantSale {
+function mapSale(item: SiprovRecord): ConsultantSale {
   const status = mapStatus(text(item.situacao) || text(item.tipoSituacao));
   const value = associateValue(item);
-  const date = associateDate(item);
+  const date = activationDate(item);
   const vehicle = record(item.veiculo);
-  const vehicleLabel = [text(vehicle?.marca), text(vehicle?.modelo)].filter(Boolean).join(' ');
+  const vehicleLabel =
+    [text(vehicle?.marca), text(vehicle?.modelo)].filter(Boolean).join(' ') || text(item.placa);
 
   return {
     id: String(integer(item.sequencial) || integer(item.codBeneficio) || '—'),
@@ -164,10 +223,7 @@ function mapSale(item: SiprovRecord, commissionRate: number | null): ConsultantS
     vehicle: vehicleLabel || text(item.tipoBeneficio) || 'Benefício',
     date: date ? formatSiprovDate(date) : '—',
     value,
-    commission:
-      commissionRate !== null && status === 'Ativa'
-        ? roundCurrency(value * (commissionRate / 100))
-        : null,
+    commission: null,
     status
   };
 }
@@ -175,12 +231,12 @@ function mapSale(item: SiprovRecord, commissionRate: number | null): ConsultantS
 function buildPerformance(
   items: SiprovRecord[],
   target: number,
-  today: Date
+  selectedMonth: Date
 ): MonthlyPerformance[] {
   return Array.from({ length: 6 }, (_, index) => {
-    const date = new Date(today.getFullYear(), today.getMonth() - (5 - index), 1);
+    const date = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() - (5 - index), 1);
     const sales = items.filter((item) => {
-      const itemDate = associateDate(item);
+      const itemDate = activationDate(item);
       return (
         itemDate?.getFullYear() === date.getFullYear() && itemDate.getMonth() === date.getMonth()
       );
@@ -206,7 +262,11 @@ function buildDelinquency(
 
   for (const item of overdue) {
     const key = String(
-      integer(item.codBeneficio) || integer(item.codPessoa) || integer(item.codTitulo) || 'unknown'
+      integer(item.sequencialBeneficio) ||
+        integer(item.codBeneficio) ||
+        integer(item.codPessoa) ||
+        integer(item.codTitulo) ||
+        'unknown'
     );
     const dueDate = titleDueDate(item) ?? referenceDate;
     const existing = grouped.get(key);
@@ -227,7 +287,10 @@ function buildDelinquency(
     return {
       id: key,
       associate:
-        text(first.nomePessoa) || text(first.nomeAssociado) || 'Associado não identificado',
+        text(first.nomeDevedorCredor) ||
+        text(first.nomePessoa) ||
+        text(first.nomeAssociado) ||
+        'Associado não identificado',
       benefit: text(first.nomePlano) || text(first.descricao) || 'Benefício Siprov',
       dueDate: formatSiprovDate(group.oldest),
       daysOverdue,
@@ -272,17 +335,14 @@ function titleAmount(item: SiprovRecord): number {
 }
 
 function titleOutstandingAmount(item: SiprovRecord): number {
-  const explicit = number(item.valorEmAberto) ?? number(item.saldo);
+  const explicit = number(item.valorEmAberto) ?? number(item.saldo) ?? number(item.valorPendente);
   if (explicit !== null) return Math.max(0, explicit);
-  return Math.max(0, titleAmount(item) - (number(item.valorPago) ?? 0));
+  const paid = number(item.valorLiquidado) ?? number(item.valorPago) ?? 0;
+  return Math.max(0, titleAmount(item) - paid);
 }
 
 function titleDueDate(item: SiprovRecord): Date | null {
   return parseDate(item.dataVencimento) ?? parseDate(item.vencimento);
-}
-
-function associateDate(item: SiprovRecord): Date | null {
-  return parseDate(item.dataAtivacao) ?? parseDate(item.dataAdesao) ?? parseDate(item.dataCadastro);
 }
 
 function associateValue(item: SiprovRecord): number {
@@ -380,11 +440,6 @@ function record(value: unknown): SiprovRecord | null {
     : null;
 }
 
-function optionalPercentage(value: string | undefined): number | null {
-  const parsed = number(value);
-  return parsed !== null && parsed >= 0 && parsed <= 100 ? parsed : null;
-}
-
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = integer(value);
   return parsed !== null && parsed > 0 ? parsed : fallback;
@@ -398,17 +453,36 @@ function roundPercentage(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-function getDemoData(): ConsultantDashboardData {
+function updatedAt(): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'America/Sao_Paulo'
+  }).format(new Date());
+}
+
+function getDemoData(periodKey?: string): ConsultantDashboardData {
+  const period = resolveConsultantPeriod(periodKey);
+  const performance = [
+    { month: 'Jun', sales: 14, target: 20 },
+    { month: 'Jul', sales: 19, target: 20 },
+    { month: 'Ago', sales: 22, target: 22 },
+    { month: 'Set', sales: 20, target: 22 },
+    { month: 'Out', sales: 27, target: 25 },
+    { month: 'Nov', sales: 18, target: 25 }
+  ];
   return {
     consultantName: 'Lucas',
     accessScope: 'consultant',
-    periodLabel: 'Novembro de 2026',
+    periodKey: period.key,
+    periodLabel: period.label,
+    periodOptions: period.options,
     isDemo: true,
     updatedAt: '03/11/2026 às 10:30',
     salesCount: 18,
     activeSales: 15,
     salesValue: 21640,
-    commissionForecast: 3246,
+    commissionForecast: null,
     target: 25,
     delinquency: {
       associates: 7,
@@ -471,14 +545,8 @@ function getDemoData(): ConsultantDashboardData {
         range: 'Mais de 90 dias'
       }
     ],
-    performance: [
-      { month: 'Jun', sales: 14, target: 20 },
-      { month: 'Jul', sales: 19, target: 20 },
-      { month: 'Ago', sales: 22, target: 22 },
-      { month: 'Set', sales: 20, target: 22 },
-      { month: 'Out', sales: 27, target: 25 },
-      { month: 'Nov', sales: 18, target: 25 }
-    ],
+    performance,
+    bestMonth: performance.toSorted((a, b) => b.sales - a.sales)[0] ?? null,
     recentSales: [
       {
         id: 'SC-1048',
@@ -487,7 +555,7 @@ function getDemoData(): ConsultantDashboardData {
         vehicle: 'Fiat Argo',
         date: '03/11/2026',
         value: 1490,
-        commission: 223.5,
+        commission: null,
         status: 'Ativa'
       },
       {
@@ -497,7 +565,7 @@ function getDemoData(): ConsultantDashboardData {
         vehicle: 'Honda CG 160',
         date: '02/11/2026',
         value: 890,
-        commission: 133.5,
+        commission: null,
         status: 'Em análise'
       },
       {
@@ -507,7 +575,7 @@ function getDemoData(): ConsultantDashboardData {
         vehicle: 'Jeep Renegade',
         date: '01/11/2026',
         value: 1890,
-        commission: 283.5,
+        commission: null,
         status: 'Ativa'
       },
       {
@@ -527,7 +595,7 @@ function getDemoData(): ConsultantDashboardData {
         vehicle: 'Yamaha Fazer',
         date: '30/10/2026',
         value: 890,
-        commission: 133.5,
+        commission: null,
         status: 'Ativa'
       },
       {
@@ -537,7 +605,7 @@ function getDemoData(): ConsultantDashboardData {
         vehicle: 'Volkswagen T-Cross',
         date: '29/10/2026',
         value: 1490,
-        commission: 0,
+        commission: null,
         status: 'Cancelada'
       }
     ]

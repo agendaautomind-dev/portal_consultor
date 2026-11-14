@@ -18,6 +18,11 @@ export interface MonthlyPerformance {
   target: number;
 }
 
+export interface PeriodOption {
+  value: string;
+  label: string;
+}
+
 export interface DelinquentAccount {
   id: string;
   associate: string;
@@ -39,19 +44,30 @@ export interface DelinquencySummary {
   dueAmount: number;
 }
 
-export interface ConsultantDashboardData {
+export interface ConsultantBaseData {
   consultantName: string;
   accessScope: ConsultantAccessScope;
-  periodLabel: string;
   isDemo: boolean;
   updatedAt: string;
+}
+
+export interface ConsultantSalesData extends ConsultantBaseData {
+  periodKey: string;
+  periodLabel: string;
+  periodOptions: PeriodOption[];
   salesCount: number;
   activeSales: number;
   salesValue: number;
   commissionForecast: number | null;
   target: number;
-  delinquency: DelinquencySummary;
-  delinquentAccounts: DelinquentAccount[];
   performance: MonthlyPerformance[];
+  bestMonth: MonthlyPerformance | null;
   recentSales: ConsultantSale[];
 }
+
+export interface ConsultantDelinquencyData extends ConsultantBaseData {
+  delinquency: DelinquencySummary;
+  delinquentAccounts: DelinquentAccount[];
+}
+
+export interface ConsultantDashboardData extends ConsultantSalesData, ConsultantDelinquencyData {}

@@ -12,7 +12,7 @@
     "start": "next start",
     "cleanup": "node scripts/cleanup.js",
     "typecheck": "tsc --noEmit",
-    "test:siprov": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test --test-isolation=none src/lib/siprov/client.test.js",
+    "test:siprov": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test --test-isolation=none src/lib/siprov/client.test.js src/features/consultant/api/period.test.js src/features/consultant/api/activation.test.js",
     "test:siprov:live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local --experimental-strip-types scripts/siprov-live-smoke.ts",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix && bun format",

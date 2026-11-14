@@ -2,21 +2,28 @@ import { auth } from '@clerk/nextjs/server';
 import PageContainer from '@/components/layout/page-container';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { getConsultantDashboardData } from '@/features/consultant/api/service';
+import { getConsultantSalesData } from '@/features/consultant/api/service';
 import { SalesTable } from '@/features/consultant/components/consultant-dashboard';
+import { PeriodSelect } from '@/features/consultant/components/period-select';
 
-export default async function SalesPage() {
+export default async function SalesPage({
+  searchParams
+}: {
+  searchParams: Promise<{ period?: string }>;
+}) {
   await auth.protect();
-  const data = await getConsultantDashboardData();
+  const { period } = await searchParams;
+  const data = await getConsultantSalesData(period);
   const isTeamView = data.accessScope === 'representative';
   return (
     <PageContainer
       pageTitle={isTeamView ? 'Vendas da equipe' : 'Minhas vendas'}
       pageDescription={
         isTeamView
-          ? 'Consulte as adesões vinculadas à sua equipe na Siprov.'
-          : 'Consulte as adesões vinculadas ao seu cadastro na Siprov.'
+          ? 'Consulte os benefícios ativados vinculados à sua equipe na Siprov.'
+          : 'Consulte os benefícios ativados vinculados ao seu cadastro na Siprov.'
       }
+      pageHeaderAction={<PeriodSelect value={data.periodKey} options={data.periodOptions} />}
     >
       <div className='mb-4 flex items-center gap-2'>
         <Badge
@@ -31,7 +38,7 @@ export default async function SalesPage() {
         </Badge>
         {isTeamView && <Badge variant='secondary'>Visão da equipe</Badge>}
         <span className='text-muted-foreground text-sm'>
-          {data.recentSales.length} registros exibidos
+          {data.recentSales.length} benefícios ativados em {data.periodLabel}
         </span>
       </div>
       <Card>

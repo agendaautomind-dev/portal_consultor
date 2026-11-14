@@ -1,5 +1,5 @@
 import { auth } from '@clerk/nextjs/server';
-import NotificationsPage from '@/features/notifications/components/notifications-page';
+import { redirect } from 'next/navigation';
 
 export const metadata = {
   title: 'Dashboard: Notifications'
@@ -7,6 +7,5 @@ export const metadata = {
 
 export default async function Page() {
   await auth.protect();
-
-  return <NotificationsPage />;
+  redirect('/dashboard/overview');
 }

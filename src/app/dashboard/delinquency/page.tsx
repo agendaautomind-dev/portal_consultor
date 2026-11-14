@@ -10,13 +10,13 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table';
-import { getConsultantDashboardData } from '@/features/consultant/api/service';
+import { getConsultantDelinquencyData } from '@/features/consultant/api/service';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
 export default async function DelinquencyPage() {
   await auth.protect();
-  const data = await getConsultantDashboardData();
+  const data = await getConsultantDelinquencyData();
   const summary = data.delinquency;
   const isTeamView = data.accessScope === 'representative';
 

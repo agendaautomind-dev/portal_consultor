@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/sidebar';
 import { UserAvatarProfile } from '@/components/user-avatar-profile';
 import { navGroups } from '@/config/nav-config';
-import { useClerk, useOrganization, useUser } from '@clerk/nextjs';
+import { useClerk, useUser } from '@clerk/nextjs';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -35,7 +35,6 @@ import { Icons } from '../icons';
 export default function AppSidebar() {
   const pathname = usePathname();
   const { user } = useUser();
-  const { organization } = useOrganization();
   const { signOut } = useClerk();
   const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
@@ -147,16 +146,6 @@ export default function AppSidebar() {
                   <DropdownMenuItem onClick={() => router.push('/dashboard/profile')}>
                     <Icons.account className='mr-2 h-4 w-4' />
                     Meu perfil
-                  </DropdownMenuItem>
-                  {organization && (
-                    <DropdownMenuItem onClick={() => router.push('/dashboard/billing')}>
-                      <Icons.creditCard className='mr-2 h-4 w-4' />
-                      Comissões
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onClick={() => router.push('/dashboard/notifications')}>
-                    <Icons.notification className='mr-2 h-4 w-4' />
-                    Notificações
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />

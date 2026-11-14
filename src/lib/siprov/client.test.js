@@ -75,6 +75,17 @@ describe('SiprovClient', () => {
     );
   });
 
+  test('reutiliza vendedores em cache sem repetir a rota lenta', async () => {
+    const client = makeClient();
+    const before = requests.filter((item) => item.path === '/ext/administracao/vendedor').length;
+
+    await client.listVendors();
+    await client.listVendors();
+
+    const after = requests.filter((item) => item.path === '/ext/administracao/vendedor').length;
+    assert.equal(after - before, 1);
+  });
+
   test('pagina associados preservando o escopo do consultor', async () => {
     const client = makeClient();
     const associates = await client.listAssociates({

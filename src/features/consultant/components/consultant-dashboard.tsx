@@ -1,18 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
 import { Icons } from '@/components/icons';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -21,7 +14,8 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table';
-import type { ConsultantDashboardData, SaleStatus } from '../api/types';
+import type { ConsultantDashboardData, ConsultantSale, SaleStatus } from '../api/types';
+import { PeriodSelect } from './period-select';
 
 interface ConsultantDashboardProps {
   data: ConsultantDashboardData;
@@ -38,7 +32,6 @@ const statusVariant: Record<SaleStatus, 'default' | 'secondary' | 'outline' | 'd
 
 export function ConsultantDashboard({ data }: ConsultantDashboardProps) {
   const isTeamView = data.accessScope === 'representative';
-  const [period, setPeriod] = useState('nov-2026');
   const targetProgress = Math.min(100, Math.round((data.salesCount / data.target) * 100));
   const maxChartValue = Math.max(
     ...data.performance.map((item) => Math.max(item.sales, item.target))
@@ -68,20 +61,10 @@ export function ConsultantDashboard({ data }: ConsultantDashboardProps) {
           <p className='text-muted-foreground mt-1'>
             {isTeamView
               ? 'Acompanhe o desempenho, as vendas e a inadimplência da sua equipe.'
-              : 'Acompanhe seu desempenho, suas vendas e comissões.'}
+              : 'Acompanhe seu desempenho, suas vendas e a inadimplência vinculada.'}
           </p>
         </div>
-        <Select value={period} onValueChange={(value) => value && setPeriod(value)}>
-          <SelectTrigger className='w-full sm:w-52'>
-            <Icons.calendar className='size-4' />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='nov-2026'>Novembro de 2026</SelectItem>
-            <SelectItem value='out-2026'>Outubro de 2026</SelectItem>
-            <SelectItem value='set-2026'>Setembro de 2026</SelectItem>
-          </SelectContent>
-        </Select>
+        <PeriodSelect value={data.periodKey} options={data.periodOptions} />
       </div>
 
       <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-5'>
@@ -92,9 +75,9 @@ export function ConsultantDashboard({ data }: ConsultantDashboardProps) {
           icon={Icons.trendingUp}
         />
         <MetricCard
-          label='Volume vendido'
+          label='Mensalidades ativadas'
           value={currency.format(data.salesValue)}
-          detail='Adesões no período'
+          detail={`Benefícios ativados em ${data.periodLabel}`}
           icon={Icons.product}
         />
         <MetricCard
@@ -104,7 +87,7 @@ export function ConsultantDashboard({ data }: ConsultantDashboardProps) {
               ? 'A calcular'
               : currency.format(data.commissionForecast)
           }
-          detail='Sujeita à validação'
+          detail='Regra comercial a confirmar'
           icon={Icons.billing}
         />
         <MetricCard
@@ -187,10 +170,22 @@ export function ConsultantDashboard({ data }: ConsultantDashboardProps) {
             <div className='bg-muted/60 rounded-lg p-4'>
               <p className='text-sm font-medium'>Ritmo atual</p>
               <p className='text-muted-foreground mt-1 text-sm'>
-                Você está a 7 vendas da meta. Mantenha uma média de 2 vendas por semana.
+                {data.salesCount >= data.target
+                  ? 'Meta alcançada nesta competência.'
+                  : `Faltam ${data.target - data.salesCount} vendas ativadas para a meta.`}
               </p>
             </div>
-            <Button className='w-full' variant='outline'>
+            <Button
+              className='w-full'
+              variant='outline'
+              nativeButton={false}
+              render={
+                <Link
+                  href={`/dashboard/goals?period=${data.periodKey}`}
+                  aria-label='Ver detalhes da meta'
+                />
+              }
+            >
               Ver detalhes da meta <Icons.arrowRight className='ml-2 size-4' />
             </Button>
           </CardContent>
@@ -203,11 +198,18 @@ export function ConsultantDashboard({ data }: ConsultantDashboardProps) {
             <CardTitle>Vendas recentes</CardTitle>
             <CardDescription>
               {isTeamView
-                ? 'Últimas adesões vinculadas à equipe'
-                : 'Últimas adesões vinculadas ao seu cadastro'}
+                ? 'Últimos benefícios ativados vinculados à equipe'
+                : 'Últimos benefícios ativados vinculados ao seu cadastro'}
             </CardDescription>
           </div>
-          <Button variant='outline' size='sm'>
+          <Button
+            variant='outline'
+            size='sm'
+            nativeButton={false}
+            render={
+              <Link href={`/dashboard/sales?period=${data.periodKey}`} aria-label='Ver todas' />
+            }
+          >
             Ver todas <Icons.arrowRight className='ml-2 size-4' />
           </Button>
         </CardHeader>
@@ -251,7 +253,7 @@ function MetricCard({
   );
 }
 
-export function SalesTable({ sales }: { sales: ConsultantDashboardData['recentSales'] }) {
+export function SalesTable({ sales }: { sales: ConsultantSale[] }) {
   return (
     <Table>
       <TableHeader>
@@ -266,6 +268,13 @@ export function SalesTable({ sales }: { sales: ConsultantDashboardData['recentSa
         </TableRow>
       </TableHeader>
       <TableBody>
+        {sales.length === 0 && (
+          <TableRow>
+            <TableCell colSpan={7} className='text-muted-foreground py-8 text-center'>
+              Nenhum benefício ativado nesta competência.
+            </TableCell>
+          </TableRow>
+        )}
         {sales.map((sale) => (
           <TableRow key={sale.id}>
             <TableCell className='font-medium'>{sale.id}</TableCell>
@@ -281,7 +290,7 @@ export function SalesTable({ sales }: { sales: ConsultantDashboardData['recentSa
             <TableCell className='text-right'>{currency.format(sale.value)}</TableCell>
             <TableCell className='text-right'>
               {sale.commission === null ? (
-                <span className='text-muted-foreground'>Pendente</span>
+                <span className='text-muted-foreground'>A definir</span>
               ) : (
                 currency.format(sale.commission)
               )}
