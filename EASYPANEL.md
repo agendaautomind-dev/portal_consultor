@@ -31,12 +31,50 @@ SIPROV_FALLBACK_TO_DEMO=false
 SIPROV_MONTHLY_TARGET=25
 SIPROV_SALES_START_DATE=01/01/2024
 SIPROV_DELINQUENCY_START_DATE=01/01/2024
-SIPROV_SKIP_VENDOR_VALIDATION=false
+
+DATABASE_URL=postgresql://usuario:senha@servico-postgres:5432/portal_consultor
+DATABASE_SSL=false
+SIPROV_WEBHOOK_SECRET=
+SIPROV_SYNC_SECRET=
 
 NEXT_PUBLIC_SENTRY_DISABLED=true
 ```
 
 As variáveis `SIPROV_TEST_*` são exclusivas dos testes locais e não devem ser configuradas no serviço de produção.
+
+Os dois segredos devem ser diferentes e ter pelo menos 32 caracteres. Eles podem ser gerados com:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+## Sincronização com a Siprov
+
+O portal cria as tabelas no PostgreSQL automaticamente no primeiro gatilho ou sincronização.
+Cadastre no Siprov, em `Ferramenta > Sistema > Gatilhos`, as URLs abaixo substituindo
+`SEGREDO` pelo valor exato de `SIPROV_WEBHOOK_SECRET`:
+
+```text
+https://portal.seudominio.com.br/api/webhooks/siprov/beneficio/SEGREDO
+https://portal.seudominio.com.br/api/webhooks/siprov/titulo/SEGREDO
+```
+
+Faça a carga inicial uma única vez, usando o segredo de sincronização no cabeçalho:
+
+```bash
+curl -X POST "https://portal.seudominio.com.br/api/siprov/sync" \
+  -H "Authorization: Bearer SEU_SIPROV_SYNC_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"initial","startDate":"2024-01-01","endDate":"2026-11-16"}'
+```
+
+Depois, configure no n8n uma chamada diária para a mesma rota com:
+
+```json
+{"mode":"daily","days":2}
+```
+
+Essa reconciliação cobre os dois últimos dias; os gatilhos mantêm as alterações em tempo real.
 
 ## Validação
 

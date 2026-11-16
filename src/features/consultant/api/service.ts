@@ -70,7 +70,6 @@ export async function getConsultantDelinquencyData(): Promise<ConsultantDelinque
 }
 
 interface ResolvedConsultant {
-  vendorId: number;
   sellerId: number;
   name: string;
   accessScope: ConsultantAccessScope;
@@ -85,25 +84,16 @@ async function loadSiprovSales(
     consultant.accessScope === 'representative'
       ? ({ representativeId: consultant.sellerId } as const)
       : ({ consultantId: consultant.sellerId } as const);
-  const shouldValidateVendor = process.env.SIPROV_SKIP_VENDOR_VALIDATION !== 'true';
   // shortcut: a Siprov só filtra associados pela data de cadastro; ajuste esta data se uma ativação puder levar mais de dois anos.
   const salesStart =
     parseConfiguredDate(process.env.SIPROV_SALES_START_DATE) ??
     new Date(period.historyStart.getFullYear() - 2, period.historyStart.getMonth(), 1);
 
-  const [vendors, associates] = await Promise.all([
-    shouldValidateVendor ? client.listVendors() : Promise.resolve([]),
-    client.listAssociates({
-      ...sellerFilter,
-      startDate: formatSiprovDate(salesStart),
-      endDate: formatSiprovDate(period.end)
-    })
-  ]);
-
-  const vendor = vendors.find((item) => integer(item.id) === consultant.vendorId);
-  if (!vendor && shouldValidateVendor) {
-    throw new ConsultantConfigurationError('O consultor configurado não está ativo na Siprov.');
-  }
+  const associates = await client.listAssociates({
+    ...sellerFilter,
+    startDate: formatSiprovDate(salesStart),
+    endDate: formatSiprovDate(period.end)
+  });
 
   const activatedAssociates = uniqueActivatedBenefits(associates);
   const currentAssociates = activatedAssociates.filter((item) => {
@@ -112,11 +102,10 @@ async function loadSiprovSales(
   });
   const sales = currentAssociates.map(mapSale);
   const target = positiveInteger(process.env.SIPROV_MONTHLY_TARGET, 25);
-  const consultantName = text(vendor?.nome) || consultant.name;
   const performance = buildPerformance(activatedAssociates, target, period.start);
 
   return {
-    consultantName,
+    consultantName: consultant.name,
     accessScope: consultant.accessScope,
     periodKey: period.key,
     periodLabel: period.label,
@@ -201,7 +190,6 @@ async function resolveConsultant(): Promise<ResolvedConsultant> {
   }
 
   return {
-    vendorId,
     sellerId,
     name: user.firstName || user.fullName || 'Consultor',
     accessScope

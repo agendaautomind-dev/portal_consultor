@@ -55,16 +55,55 @@ export class SiprovClient {
       endDate: string;
     }
   ): Promise<SiprovRecord[]> {
-    return this.cachedRecords(`associates:${JSON.stringify(params)}`, 5 * 60_000, async () => {
+    return this.listAssociateRecords({
+      ...sellerFilterParams(params),
+      dataCadastroInicial: params.startDate,
+      dataCadastroFinal: params.endDate
+    });
+  }
+
+  async listAllAssociates(startDate: string, endDate: string): Promise<SiprovRecord[]> {
+    return this.listAssociateRecords({
+      dataCadastroInicial: startDate,
+      dataCadastroFinal: endDate
+    });
+  }
+
+  async listAssociatesUpdated(updateDate: string): Promise<SiprovRecord[]> {
+    return this.listAssociateRecords({ dataAtualizacao: updateDate });
+  }
+
+  async listTitles(
+    params: SiprovSellerFilter & {
+      dateField: 'emission' | 'due' | 'liquidation';
+      startDate: string;
+      endDate: string;
+    }
+  ): Promise<SiprovRecord[]> {
+    return this.listTitleRecords({
+      ...sellerFilterParams(params),
+      ...titleDateParams(params.dateField, params.startDate, params.endDate)
+    });
+  }
+
+  async listAllTitles(params: {
+    dateField: 'emission' | 'due' | 'liquidation';
+    startDate: string;
+    endDate: string;
+  }): Promise<SiprovRecord[]> {
+    return this.listTitleRecords(
+      titleDateParams(params.dateField, params.startDate, params.endDate)
+    );
+  }
+
+  private async listAssociateRecords(
+    filters: Record<string, string | number>
+  ): Promise<SiprovRecord[]> {
+    return this.cachedRecords(`associates:${JSON.stringify(filters)}`, 5 * 60_000, async () => {
       const result: SiprovRecord[] = [];
 
       for (let page = 1; page <= 100; page += 1) {
-        const response = await this.get('/ext/associado', {
-          ...sellerFilterParams(params),
-          dataCadastroInicial: params.startDate,
-          dataCadastroFinal: params.endDate,
-          pagina: page
-        });
+        const response = await this.get('/ext/associado', { ...filters, pagina: page });
         const items = extractItems(response);
         result.push(...items);
 
@@ -75,23 +114,17 @@ export class SiprovClient {
     });
   }
 
-  async listTitles(
-    params: SiprovSellerFilter & {
-      dateField: 'emission' | 'due' | 'liquidation';
-      startDate: string;
-      endDate: string;
-    }
+  private async listTitleRecords(
+    filters: Record<string, string | number>
   ): Promise<SiprovRecord[]> {
-    return this.cachedRecords(`titles:${JSON.stringify(params)}`, 2 * 60_000, async () => {
+    return this.cachedRecords(`titles:${JSON.stringify(filters)}`, 2 * 60_000, async () => {
       const result: SiprovRecord[] = [];
-      const dateParams = titleDateParams(params.dateField, params.startDate, params.endDate);
       let offset = 0;
 
       for (let page = 0; page < 100; page += 1) {
         const response = await this.get('/ext/financeiro/titulo', {
           tipo: 'Crédito',
-          ...sellerFilterParams(params),
-          ...dateParams,
+          ...filters,
           inicio: offset
         });
         const items = extractItems(response);
@@ -229,14 +262,17 @@ function sellerFilterParams(filter: SiprovSellerFilter): Record<string, number> 
   return { codConsultor: filter.consultantId };
 }
 
-let sharedClient: SiprovClient | null = null;
+const globalSiprov = globalThis as typeof globalThis & {
+  portalSiprovClient?: SiprovClient;
+};
 
 export function isSiprovEnabled(): boolean {
   return process.env.SIPROV_ENABLED?.trim().toLowerCase() === 'true';
 }
 
 export function getSiprovClient(): SiprovClient {
-  if (sharedClient) return sharedClient;
+  // O global mantém token e cache entre os diferentes bundles de rota do Next.js.
+  if (globalSiprov.portalSiprovClient) return globalSiprov.portalSiprovClient;
 
   const username = process.env.SIPROV_USERNAME?.trim();
   const password = process.env.SIPROV_PASSWORD;
@@ -251,13 +287,13 @@ export function getSiprovClient(): SiprovClient {
 
   assertApiBaseUrl(baseUrl);
 
-  sharedClient = new SiprovClient({
+  globalSiprov.portalSiprovClient = new SiprovClient({
     baseUrl,
     username,
     password,
     timeoutMs: positiveInteger(process.env.SIPROV_TIMEOUT_MS, 40_000)
   });
-  return sharedClient;
+  return globalSiprov.portalSiprovClient;
 }
 
 function assertApiBaseUrl(baseUrl: string): void {

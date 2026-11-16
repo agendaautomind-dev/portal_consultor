@@ -137,6 +137,23 @@ describe('SiprovClient', () => {
     assert.equal(titleCall?.query.has('codConsultor'), false);
   });
 
+  test('sincroniza alterações globais sem limitar a um vendedor', async () => {
+    const client = makeClient();
+    await client.listAssociatesUpdated('16/11/2026');
+    await client.listAllTitles({
+      dateField: 'liquidation',
+      startDate: '15/11/2026',
+      endDate: '16/11/2026'
+    });
+
+    const associateCall = requests.filter((item) => item.path === '/ext/associado').at(-1);
+    const titleCall = requests.filter((item) => item.path === '/ext/financeiro/titulo').at(-1);
+    assert.equal(associateCall?.query.get('dataAtualizacao'), '16/11/2026');
+    assert.equal(associateCall?.query.has('codConsultor'), false);
+    assert.equal(titleCall?.query.get('dataLiquidacaoInicial'), '15/11/2026');
+    assert.equal(titleCall?.query.has('codRepresentante'), false);
+  });
+
   test('respeita rate limit transitório e repete a autenticação', async () => {
     const client = makeClient('/rate-limit');
     const vendors = await client.listVendors();
